@@ -57,6 +57,15 @@ app = FastAPI(
     version="20.0.0"
 )
 
+
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
+    return {
+        "status": "running",
+        "service": "AI Trading Bot"
+    }
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
