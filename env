@@ -1,0 +1,40 @@
+# ===== EXCHANGE API KEYS =====
+BINANCE_API_KEY=PGsmXaHPUJXlPSsJxurzN6byeIIpyW8lAZJACsSsT712qEApMEMOfJZipvNnmtYp
+BINANCE_SECRET=CXFOFNQsPx1dz1aNI0j0twxaVh7W3NY51gaA6UXvnezZXebfggNcxqJB98k84hGX
+BYBIT_API_KEY=your_bybit_api_key
+BYBIT_SECRET=your_bybit_secret
+
+# ===== AI PROVIDERS =====
+OPENAI_API_KEY=your_openai_api_key
+GROQ_API_KEY=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
+GEMINI_API_KEY=your_gemini_api_key
+DEEPSEEK_API_KEY=your_deepseek_api_key
+
+# ===== TELEGRAM =====
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+
+# ===== DATABASE =====
+DATABASE_URL=sqlite+aiosqlite:///./trading_bot.db
+
+# ===== TRADING CONFIG =====
+ACTIVE_EXCHANGE=binance
+TRADING_PAIRS=BTC/USDT,ETH/USDT,XAU/USDT
+RISK_PERCENT=1.0
+MAX_DAILY_LOSS_PERCENT=5.0
+LEVERAGE=1
+USE_TESTNET=true
+
+# ===== AI CONFIG =====
+PRIMARY_AI_PROVIDER=groq
+AI_MODEL=llama3-70b-8192
+ENABLE_AI_REASONING=true
+
+# ===== DASHBOARD =====
+DASHBOARD_HOST=0.0.0.0
+DASHBOARD_PORT=8000
+SECRET_KEY=change_this_to_random_string
+
+# ===== LOGGING =====
+LOG_LEVEL=INFO
+LOG_FILE=logs/trading_bot.log
