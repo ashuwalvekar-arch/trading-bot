@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
+import random
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
@@ -34,15 +37,11 @@ except ImportError:
 # =========================================================
 
 try:
+    from prediction.ai_predictor import predict_next_candle
 
-    from prediction.ai_predictor import (
-        predict_next_candle
-    )
-
-except:
+except Exception:
 
     def predict_next_candle(*args):
-
         return {
             "signal": "BUY",
             "confidence": 88
@@ -56,15 +55,6 @@ app = FastAPI(
     title="Institutional AI Trading Dashboard",
     version="20.0.0"
 )
-
-
-@app.api_route("/", methods=["GET", "HEAD"])
-async def root():
-    return {
-        "status": "running",
-        "service": "AI Trading Bot"
-    }
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,7 +80,6 @@ else:
 # =========================================================
 
 SYMBOLS = [
-
     "GOLD.i#",
     "BTCUSD#",
     "EURUSD#",
@@ -108,6 +97,43 @@ trade_history_data = []
 _connected_ws: List[WebSocket] = []
 
 # =========================================================
+# REAL AI LEARNING DATASET
+# =========================================================
+
+MARKET_DATA_FILE = Path("market_data.csv")
+
+
+def save_market_data(ema20, ema50, rsi, returns, volume, target):
+
+    try:
+        file_exists = MARKET_DATA_FILE.exists()
+
+        with open(MARKET_DATA_FILE, "a", newline="") as f:
+            writer = csv.writer(f)
+
+            if not file_exists:
+                writer.writerow([
+                    "ema20",
+                    "ema50",
+                    "rsi",
+                    "returns",
+                    "tick_volume",
+                    "target"
+                ])
+
+            writer.writerow([
+                round(float(ema20), 6),
+                round(float(ema50), 6),
+                round(float(rsi), 6),
+                round(float(returns), 6),
+                round(float(volume), 2),
+                int(target)
+            ])
+
+    except Exception as e:
+        print("DATA LOGGER ERROR:", e)
+
+# =========================================================
 # TELEGRAM
 # =========================================================
 
@@ -121,7 +147,6 @@ def send_telegram(message):
         return
 
     try:
-
         url = (
             f"https://api.telegram.org/bot"
             f"{TELEGRAM_BOT_TOKEN}"
@@ -133,14 +158,9 @@ def send_telegram(message):
             "text": message
         }
 
-        requests.post(
-            url,
-            data=payload,
-            timeout=10
-        )
+        requests.post(url, data=payload, timeout=10)
 
     except Exception as e:
-
         print("TELEGRAM ERROR:", e)
 
 # =========================================================
@@ -151,19 +171,8 @@ def send_telegram(message):
 def session_filter():
 
     hour = datetime.utcnow().hour
-
-    london = (
-        hour >= 7
-        and
-        hour <= 11
-    )
-
-    newyork = (
-        hour >= 13
-        and
-        hour <= 17
-    )
-
+    london = (hour >= 7 and hour <= 11)
+    newyork = (hour >= 13 and hour <= 17)
     return london or newyork
 
 # =========================================================
@@ -182,39 +191,25 @@ HIGH_IMPACT_NEWS = [
 def news_filter():
 
     try:
-
         url = (
             "https://nfs.faireconomy.media/"
             "ff_calendar_thisweek.json"
         )
 
-        data = requests.get(
-            url,
-            timeout=10
-        ).json()
+        data = requests.get(url, timeout=10).json()
 
         for event in data:
-
-            title = str(
-                event.get("title", "")
-            )
-
-            impact = str(
-                event.get("impact", "")
-            )
+            title = str(event.get("title", ""))
+            impact = str(event.get("impact", ""))
 
             if impact.lower() == "high":
-
                 for keyword in HIGH_IMPACT_NEWS:
-
                     if keyword.lower() in title.lower():
-
                         return False
 
         return True
 
-    except:
-
+    except Exception:
         return True
 
 # =========================================================
@@ -234,17 +229,13 @@ def prop_firm_check():
     positions = mt5.positions_get()
 
     if positions:
-
         if len(positions) >= MAX_OPEN_TRADES:
-
             return False
 
     account = mt5.account_info()
 
     if account:
-
         if account.profit < -MAX_DAILY_LOSS:
-
             return False
 
     return True
@@ -262,22 +253,11 @@ def calculate_lot_size(stop_loss_points):
     account = mt5.account_info()
 
     if account is None:
-
         return 0.01
 
     balance = account.balance
-
-    risk_amount = (
-        balance
-        *
-        RISK_PERCENT
-    ) / 100
-
-    lot_size = (
-        risk_amount
-        /
-        stop_loss_points
-    ) / 10
+    risk_amount = (balance * RISK_PERCENT) / 100
+    lot_size = (risk_amount / stop_loss_points) / 10
 
     if lot_size < 0.01:
         lot_size = 0.01
@@ -297,7 +277,6 @@ def trailing_stop_manager():
     while True:
 
         try:
-
             if not MT5_AVAILABLE or mt5 is None:
                 time.sleep(30)
                 continue
@@ -305,28 +284,18 @@ def trailing_stop_manager():
             positions = mt5.positions_get()
 
             if positions:
-
                 for pos in positions:
-
                     if pos.profit > 5:
-
                         request = {
-
                             "action": mt5.TRADE_ACTION_SLTP,
-
                             "symbol": pos.symbol,
-
                             "position": pos.ticket,
-
                             "sl": pos.price_open,
-
                             "tp": pos.tp
                         }
-
                         mt5.order_send(request)
 
         except Exception as e:
-
             print("TRAILING STOP ERROR:", e)
 
         time.sleep(10)
@@ -334,8 +303,6 @@ def trailing_stop_manager():
 # =========================================================
 # DEMO DATA GENERATOR (used when MT5 is unavailable)
 # =========================================================
-
-import random
 
 _DEMO_PRICES = {
     "GOLD.i#": 2320.00,
@@ -352,6 +319,7 @@ def get_demo_rates(symbol, count=300):
     base = _DEMO_PRICES.get(symbol, 1000.0)
     rows = []
     price = base
+
     for i in range(count):
         change = random.uniform(-0.002, 0.002) * price
         open_ = price
@@ -366,6 +334,7 @@ def get_demo_rates(symbol, count=300):
             "tick_volume": random.randint(100, 2000),
         })
         price = close
+
     return rows
 
 # =========================================================
@@ -376,6 +345,8 @@ def get_demo_rates(symbol, count=300):
 def multi_timeframe_mt5_symbol(symbol):
 
     try:
+        bullish = 0
+        bearish = 0
 
         if MT5_AVAILABLE and mt5 is not None:
             timeframes = {
@@ -384,33 +355,15 @@ def multi_timeframe_mt5_symbol(symbol):
                 "H1": mt5.TIMEFRAME_H1
             }
 
-            bullish = 0
-            bearish = 0
-
             for _, tf in timeframes.items():
-
-                rates = mt5.copy_rates_from_pos(
-                    symbol,
-                    tf,
-                    0,
-                    200
-                )
+                rates = mt5.copy_rates_from_pos(symbol, tf, 0, 200)
 
                 if rates is None:
                     continue
 
                 df = pd.DataFrame(rates)
-
-                df['ema20'] = ta.trend.ema_indicator(
-                    df['close'],
-                    window=20
-                )
-
-                df['ema50'] = ta.trend.ema_indicator(
-                    df['close'],
-                    window=50
-                )
-
+                df['ema20'] = ta.trend.ema_indicator(df['close'], window=20)
+                df['ema50'] = ta.trend.ema_indicator(df['close'], window=50)
                 latest = df.iloc[-1]
 
                 if latest['ema20'] > latest['ema50']:
@@ -420,13 +373,12 @@ def multi_timeframe_mt5_symbol(symbol):
 
         else:
             # Demo mode: use synthetic data for all 3 timeframes
-            bullish = 0
-            bearish = 0
             for _ in range(3):
                 df = pd.DataFrame(get_demo_rates(symbol, 200))
                 df['ema20'] = ta.trend.ema_indicator(df['close'], window=20)
                 df['ema50'] = ta.trend.ema_indicator(df['close'], window=50)
                 latest = df.iloc[-1]
+
                 if latest['ema20'] > latest['ema50']:
                     bullish += 1
                 else:
@@ -440,8 +392,7 @@ def multi_timeframe_mt5_symbol(symbol):
 
         return "WAIT"
 
-    except:
-
+    except Exception:
         return "WAIT"
 
 # =========================================================
@@ -452,7 +403,6 @@ def multi_timeframe_mt5_symbol(symbol):
 def generate_signal_for_symbol(symbol):
 
     try:
-
         if MT5_AVAILABLE and mt5 is not None:
             rates = mt5.copy_rates_from_pos(
                 symbol,
@@ -468,27 +418,20 @@ def generate_signal_for_symbol(symbol):
 
         df = pd.DataFrame(rates)
 
-        df['ema20'] = ta.trend.ema_indicator(
-            df['close'],
-            window=20
-        )
+        df['ema20'] = ta.trend.ema_indicator(df['close'], window=20)
+        df['ema50'] = ta.trend.ema_indicator(df['close'], window=50)
+        df['rsi'] = ta.momentum.rsi(df['close'], window=14)
 
-        df['ema50'] = ta.trend.ema_indicator(
-            df['close'],
-            window=50
-        )
-
-        df['rsi'] = ta.momentum.rsi(
-            df['close'],
-            window=14
-        )
+        # REAL RETURNS — used for AI training + prediction
+        df['returns'] = df['close'].pct_change()
 
         latest = df.iloc[-1]
 
-        entry = round(
-            latest['close'],
-            2
-        )
+        # Guard against NaN returns on first candle
+        if pd.isna(latest['returns']):
+            latest = df.iloc[-2]
+
+        entry = round(latest['close'], 2)
 
         signal = "WAIT"
         confidence = 0
@@ -511,63 +454,69 @@ def generate_signal_for_symbol(symbol):
         if latest['rsi'] < 45:
             sell_score += 1
 
+        # FIX: pass returns instead of close
         ai = predict_next_candle(
             latest['ema20'],
             latest['ema50'],
             latest['rsi'],
-            latest['close'],
+            latest['returns'],
             latest['tick_volume']
         )
 
         confidence = ai['confidence']
 
+        # =========================================================
+        # SAVE REAL MARKET DATA
+        # =========================================================
+
+        try:
+            target = 1 if latest['ema20'] > latest['ema50'] else 0
+
+            save_market_data(
+                ema20=latest['ema20'],
+                ema50=latest['ema50'],
+                rsi=latest['rsi'],
+                returns=latest['returns'],
+                volume=latest['tick_volume'],
+                target=target
+            )
+
+        except Exception as e:
+            print("AI DATA SAVE ERROR:", e)
+
         if (
             buy_score >= 2
-            and
-            mtf == "BUY"
-            and
-            confidence >= 70
+            and mtf == "BUY"
+            and confidence >= 70
         ):
-
             signal = "BUY"
             sl = round(entry - 10, 2)
             tp = round(entry + 25, 2)
 
         elif (
             sell_score >= 2
-            and
-            mtf == "SELL"
-            and
-            confidence >= 70
+            and mtf == "SELL"
+            and confidence >= 70
         ):
-
             signal = "SELL"
             sl = round(entry + 10, 2)
             tp = round(entry - 25, 2)
 
         return {
-
             "symbol": symbol,
-
             "signal": signal,
-
             "price": entry,
-
             "sl": sl,
-
             "tp": tp,
-
             "confidence": confidence,
-
-            "reason":
-            f"Institutional AI Scanner | MTF {mtf}"
-            + ("" if MT5_AVAILABLE else " [DEMO]")
+            "reason": (
+                f"Institutional AI Scanner | MTF {mtf}"
+                + ("" if MT5_AVAILABLE else " [DEMO]")
+            )
         }
 
     except Exception as e:
-
         print("SCAN ERROR:", symbol, e)
-
         return None
 
 # =========================================================
@@ -580,7 +529,6 @@ def generate_best_signal():
     all_signals = []
 
     for symbol in SYMBOLS:
-
         signal = generate_signal_for_symbol(symbol)
 
         if signal is None:
@@ -592,7 +540,6 @@ def generate_best_signal():
         all_signals.append(signal)
 
     if len(all_signals) == 0:
-
         return {
             "symbol": "NONE",
             "signal": "WAIT",
@@ -603,12 +550,7 @@ def generate_best_signal():
             "reason": "No institutional setup"
         }
 
-    best = max(
-        all_signals,
-        key=lambda x:
-        x['confidence']
-    )
-
+    best = max(all_signals, key=lambda x: x['confidence'])
     return best
 
 # =========================================================
@@ -621,82 +563,56 @@ def auto_trader():
     while True:
 
         try:
-
             signal = generate_best_signal()
 
             if (
                 signal['signal'] == "WAIT"
-                or
-                signal['confidence'] < 70
+                or signal['confidence'] < 70
             ):
-
-                time.sleep(20)
-
+                time.sleep(60)  # FIX: was 20
                 continue
 
             if not session_filter():
-
                 time.sleep(60)
-
                 continue
 
             if not news_filter():
-
                 time.sleep(60)
-
                 continue
 
             if not prop_firm_check():
-
                 time.sleep(60)
-
                 continue
 
             symbol = signal['symbol']
 
             # --- MT5 live execution ---
             if MT5_AVAILABLE and mt5 is not None:
-
                 tick = mt5.symbol_info_tick(symbol)
 
                 if tick is None:
-
                     time.sleep(10)
-
                     continue
 
                 order_type = mt5.ORDER_TYPE_BUY
                 price = tick.ask
 
                 if signal['signal'] == "SELL":
-
                     order_type = mt5.ORDER_TYPE_SELL
                     price = tick.bid
 
                 request = {
-
                     "action": mt5.TRADE_ACTION_DEAL,
-
                     "symbol": symbol,
-
                     "volume": calculate_lot_size(10),
-
                     "type": order_type,
-
                     "price": price,
-
                     "sl": signal['sl'],
-
                     "tp": signal['tp'],
-
                     "deviation": 20,
-
                     "magic": 100,
-
                     "comment": "MULTI ASSET AI",
-
                     "type_time": mt5.ORDER_TIME_GTC,
-
                     "type_filling": mt5.ORDER_FILLING_IOC,
                 }
 
@@ -705,41 +621,47 @@ def auto_trader():
 
             else:
                 # Demo mode — log trade without sending to broker
-                print(f"[DEMO] Simulated {signal['signal']} on {symbol} @ {signal['price']}")
+                print(
+                    f"[DEMO] Simulated {signal['signal']} "
+                    f"on {symbol} @ {signal['price']}"
+                )
 
             trade_history_data.append({
-
-                "time": datetime.utcnow().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-
+                "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "symbol": symbol,
-
                 "signal": signal['signal'],
-
                 "entry": signal['price'],
-
                 "confidence": signal['confidence']
             })
 
             send_telegram(
-
                 f"AI TRADE EXECUTED\n\n"
-
                 f"Symbol: {symbol}\n"
-
                 f"Signal: {signal['signal']}\n"
-
                 f"Confidence: {signal['confidence']}%"
             )
 
             time.sleep(120)
 
         except Exception as e:
-
             print("AUTO TRADER:", e)
+            time.sleep(60)  # FIX: was 30
 
-            time.sleep(30)
+# =========================================================
+# ROUTES
+# =========================================================
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "running",
+        "service": "AI Trading Bot"
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    return DASHBOARD_HTML
 
 # =========================================================
 # ANALYTICS
@@ -749,16 +671,12 @@ def auto_trader():
 async def advanced_analytics():
 
     total_trades = len(trade_history_data)
-
     buy_count = 0
     sell_count = 0
-
     equity_curve = []
-
     equity = 1000
 
     for trade in trade_history_data:
-
         if trade['signal'] == "BUY":
             buy_count += 1
 
@@ -766,7 +684,6 @@ async def advanced_analytics():
             sell_count += 1
 
         equity += 10
-
         equity_curve.append(equity)
 
     return {
@@ -786,23 +703,17 @@ async def signal_loop():
     while True:
 
         try:
-
             signal = generate_best_signal()
 
             _latest_signals.clear()
             _latest_signals.append(signal)
 
-            await broadcast_ws(
-                json.dumps(signal)
-            )
-
-            await asyncio.sleep(10)
+            await broadcast_ws(json.dumps(signal))
+            await asyncio.sleep(10)  # FIX: was 5
 
         except Exception as e:
-
             print("SIGNAL LOOP ERROR:", e)
-
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
 
 # =========================================================
 # STARTUP
@@ -811,9 +722,7 @@ async def signal_loop():
 @app.on_event("startup")
 async def startup():
 
-    asyncio.create_task(
-        signal_loop()
-    )
+    asyncio.create_task(signal_loop())
 
     threading.Thread(
         target=trailing_stop_manager,
@@ -829,31 +738,22 @@ async def startup():
 # API
 # =========================================================
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    return DASHBOARD_HTML
-
 @app.get("/api/signals")
 async def signals():
 
     if len(_latest_signals) == 0:
-        _latest_signals.append(
-            generate_best_signal()
-        )
+        _latest_signals.append(generate_best_signal())
 
-    return {
-        "signals": _latest_signals
-    }
+    return {"signals": _latest_signals}
+
 
 @app.post("/execute_trade")
 async def execute_trade():
 
     try:
-
         signal = generate_best_signal()
 
         if signal['signal'] == "WAIT":
-
             return {
                 "status": "error",
                 "message": "No valid trade setup"
@@ -862,11 +762,9 @@ async def execute_trade():
         symbol = signal['symbol']
 
         if MT5_AVAILABLE and mt5 is not None:
-
             tick = mt5.symbol_info_tick(symbol)
 
             if tick is None:
-
                 return {
                     "status": "error",
                     "message": "No tick data"
@@ -876,7 +774,6 @@ async def execute_trade():
             price = tick.ask
 
             if signal["signal"] == "SELL":
-
                 order_type = mt5.ORDER_TYPE_SELL
                 price = tick.bid
 
@@ -900,7 +797,10 @@ async def execute_trade():
         else:
             # Demo mode
             result = "[DEMO] Order simulated — MT5 not available on this platform"
-            print(f"[DEMO] execute_trade: {signal['signal']} {symbol} @ {signal['price']}")
+            print(
+                f"[DEMO] execute_trade: {signal['signal']} "
+                f"{symbol} @ {signal['price']}"
+            )
 
         trade_history_data.append({
             "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
@@ -917,7 +817,6 @@ async def execute_trade():
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "message": str(e)
@@ -931,32 +830,30 @@ async def execute_trade():
 async def websocket_endpoint(ws: WebSocket):
 
     await ws.accept()
-
     _connected_ws.append(ws)
 
     try:
-
         while True:
             await ws.receive_text()
 
     except WebSocketDisconnect:
+        if ws in _connected_ws:
+            _connected_ws.remove(ws)
 
-        _connected_ws.remove(ws)
 
 async def broadcast_ws(message: str):
 
     dead = []
 
     for ws in _connected_ws:
-
         try:
             await ws.send_text(message)
-
-        except:
+        except Exception:
             dead.append(ws)
 
     for ws in dead:
-        _connected_ws.remove(ws)
+        if ws in _connected_ws:
+            _connected_ws.remove(ws)
 
 # =========================================================
 # HTML
@@ -1322,7 +1219,8 @@ btn.disabled = false
 }
 
 try {
-const ws = new WebSocket('ws://' + location.host + '/ws')
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+const ws = new WebSocket(wsProto + '//' + location.host + '/ws')
 ws.onmessage = (e) => {
 try {
 const s = JSON.parse(e.data)
