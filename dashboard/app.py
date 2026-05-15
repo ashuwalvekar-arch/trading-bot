@@ -17,7 +17,17 @@ from fastapi import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-import MetaTrader5 as mt5
+# =========================================================
+# MT5 GRACEFUL IMPORT (Windows only)
+# =========================================================
+
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None
+    MT5_AVAILABLE = False
+    print("WARNING: MetaTrader5 not available (Linux/Mac). Running in DEMO mode.")
 
 # =========================================================
 # OPTIONAL AI IMPORTS
@@ -58,13 +68,13 @@ app.add_middleware(
 # MT5 INIT
 # =========================================================
 
-if not mt5.initialize():
-
-    print("MT5 INIT FAILED")
-
+if MT5_AVAILABLE:
+    if not mt5.initialize():
+        print("MT5 INIT FAILED")
+    else:
+        print("MT5 CONNECTED")
 else:
-
-    print("MT5 CONNECTED")
+    print("MT5 SKIPPED — running in demo/simulation mode")
 
 # =========================================================
 # SYMBOLS
@@ -209,6 +219,9 @@ RISK_PERCENT = 1
 
 def prop_firm_check():
 
+    if not MT5_AVAILABLE or mt5 is None:
+        return True  # Allow in demo mode
+
     positions = mt5.positions_get()
 
     if positions:
@@ -233,6 +246,9 @@ def prop_firm_check():
 
 
 def calculate_lot_size(stop_loss_points):
+
+    if not MT5_AVAILABLE or mt5 is None:
+        return 0.01  # Default demo lot size
 
     account = mt5.account_info()
 
@@ -273,6 +289,10 @@ def trailing_stop_manager():
 
         try:
 
+            if not MT5_AVAILABLE or mt5 is None:
+                time.sleep(30)
+                continue
+
             positions = mt5.positions_get()
 
             if positions:
@@ -303,6 +323,43 @@ def trailing_stop_manager():
         time.sleep(10)
 
 # =========================================================
+# DEMO DATA GENERATOR (used when MT5 is unavailable)
+# =========================================================
+
+import random
+
+_DEMO_PRICES = {
+    "GOLD.i#": 2320.00,
+    "BTCUSD#": 65000.00,
+    "EURUSD#": 1.0850,
+    "NAS100#": 18500.00,
+    "US30#": 39500.00,
+    "GBPJPY#": 195.50,
+}
+
+
+def get_demo_rates(symbol, count=300):
+    """Generate synthetic OHLCV data for demo mode."""
+    base = _DEMO_PRICES.get(symbol, 1000.0)
+    rows = []
+    price = base
+    for i in range(count):
+        change = random.uniform(-0.002, 0.002) * price
+        open_ = price
+        close = price + change
+        high = max(open_, close) + abs(random.uniform(0, 0.001) * price)
+        low = min(open_, close) - abs(random.uniform(0, 0.001) * price)
+        rows.append({
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "tick_volume": random.randint(100, 2000),
+        })
+        price = close
+    return rows
+
+# =========================================================
 # MULTI TIMEFRAME ANALYSIS
 # =========================================================
 
@@ -311,46 +368,60 @@ def multi_timeframe_mt5_symbol(symbol):
 
     try:
 
-        timeframes = {
+        if MT5_AVAILABLE and mt5 is not None:
+            timeframes = {
+                "M5": mt5.TIMEFRAME_M5,
+                "M15": mt5.TIMEFRAME_M15,
+                "H1": mt5.TIMEFRAME_H1
+            }
 
-            "M5": mt5.TIMEFRAME_M5,
-            "M15": mt5.TIMEFRAME_M15,
-            "H1": mt5.TIMEFRAME_H1
-        }
+            bullish = 0
+            bearish = 0
 
-        bullish = 0
-        bearish = 0
+            for _, tf in timeframes.items():
 
-        for _, tf in timeframes.items():
+                rates = mt5.copy_rates_from_pos(
+                    symbol,
+                    tf,
+                    0,
+                    200
+                )
 
-            rates = mt5.copy_rates_from_pos(
-                symbol,
-                tf,
-                0,
-                200
-            )
+                if rates is None:
+                    continue
 
-            if rates is None:
-                continue
+                df = pd.DataFrame(rates)
 
-            df = pd.DataFrame(rates)
+                df['ema20'] = ta.trend.ema_indicator(
+                    df['close'],
+                    window=20
+                )
 
-            df['ema20'] = ta.trend.ema_indicator(
-                df['close'],
-                window=20
-            )
+                df['ema50'] = ta.trend.ema_indicator(
+                    df['close'],
+                    window=50
+                )
 
-            df['ema50'] = ta.trend.ema_indicator(
-                df['close'],
-                window=50
-            )
+                latest = df.iloc[-1]
 
-            latest = df.iloc[-1]
+                if latest['ema20'] > latest['ema50']:
+                    bullish += 1
+                else:
+                    bearish += 1
 
-            if latest['ema20'] > latest['ema50']:
-                bullish += 1
-            else:
-                bearish += 1
+        else:
+            # Demo mode: use synthetic data for all 3 timeframes
+            bullish = 0
+            bearish = 0
+            for _ in range(3):
+                df = pd.DataFrame(get_demo_rates(symbol, 200))
+                df['ema20'] = ta.trend.ema_indicator(df['close'], window=20)
+                df['ema50'] = ta.trend.ema_indicator(df['close'], window=50)
+                latest = df.iloc[-1]
+                if latest['ema20'] > latest['ema50']:
+                    bullish += 1
+                else:
+                    bearish += 1
 
         if bullish >= 2:
             return "BUY"
@@ -373,12 +444,15 @@ def generate_signal_for_symbol(symbol):
 
     try:
 
-        rates = mt5.copy_rates_from_pos(
-            symbol,
-            mt5.TIMEFRAME_M5,
-            0,
-            300
-        )
+        if MT5_AVAILABLE and mt5 is not None:
+            rates = mt5.copy_rates_from_pos(
+                symbol,
+                mt5.TIMEFRAME_M5,
+                0,
+                300
+            )
+        else:
+            rates = get_demo_rates(symbol, 300)
 
         if rates is None:
             return None
@@ -478,6 +552,7 @@ def generate_signal_for_symbol(symbol):
 
             "reason":
             f"Institutional AI Scanner | MTF {mtf}"
+            + ("" if MT5_AVAILABLE else " [DEMO]")
         }
 
     except Exception as e:
@@ -570,50 +645,58 @@ def auto_trader():
 
             symbol = signal['symbol']
 
-            tick = mt5.symbol_info_tick(symbol)
+            # --- MT5 live execution ---
+            if MT5_AVAILABLE and mt5 is not None:
 
-            if tick is None:
+                tick = mt5.symbol_info_tick(symbol)
 
-                time.sleep(10)
+                if tick is None:
 
-                continue
+                    time.sleep(10)
 
-            order_type = mt5.ORDER_TYPE_BUY
-            price = tick.ask
+                    continue
 
-            if signal['signal'] == "SELL":
+                order_type = mt5.ORDER_TYPE_BUY
+                price = tick.ask
 
-                order_type = mt5.ORDER_TYPE_SELL
-                price = tick.bid
+                if signal['signal'] == "SELL":
 
-            request = {
+                    order_type = mt5.ORDER_TYPE_SELL
+                    price = tick.bid
 
-                "action": mt5.TRADE_ACTION_DEAL,
+                request = {
 
-                "symbol": symbol,
+                    "action": mt5.TRADE_ACTION_DEAL,
 
-                "volume": calculate_lot_size(10),
+                    "symbol": symbol,
 
-                "type": order_type,
+                    "volume": calculate_lot_size(10),
 
-                "price": price,
+                    "type": order_type,
 
-                "sl": signal['sl'],
+                    "price": price,
 
-                "tp": signal['tp'],
+                    "sl": signal['sl'],
 
-                "deviation": 20,
+                    "tp": signal['tp'],
 
-                "magic": 100,
+                    "deviation": 20,
 
-                "comment": "MULTI ASSET AI",
+                    "magic": 100,
 
-                "type_time": mt5.ORDER_TIME_GTC,
+                    "comment": "MULTI ASSET AI",
 
-                "type_filling": mt5.ORDER_FILLING_IOC,
-            }
+                    "type_time": mt5.ORDER_TIME_GTC,
 
-            result = mt5.order_send(request)
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+
+                result = mt5.order_send(request)
+                print(result)
+
+            else:
+                # Demo mode — log trade without sending to broker
+                print(f"[DEMO] Simulated {signal['signal']} on {symbol} @ {signal['price']}")
 
             trade_history_data.append({
 
@@ -640,8 +723,6 @@ def auto_trader():
 
                 f"Confidence: {signal['confidence']}%"
             )
-
-            print(result)
 
             time.sleep(120)
 
@@ -771,39 +852,54 @@ async def execute_trade():
 
         symbol = signal['symbol']
 
-        tick = mt5.symbol_info_tick(symbol)
+        if MT5_AVAILABLE and mt5 is not None:
 
-        if tick is None:
+            tick = mt5.symbol_info_tick(symbol)
 
-            return {
-                "status": "error",
-                "message": "No tick data"
+            if tick is None:
+
+                return {
+                    "status": "error",
+                    "message": "No tick data"
+                }
+
+            order_type = mt5.ORDER_TYPE_BUY
+            price = tick.ask
+
+            if signal["signal"] == "SELL":
+
+                order_type = mt5.ORDER_TYPE_SELL
+                price = tick.bid
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": calculate_lot_size(10),
+                "type": order_type,
+                "price": price,
+                "sl": signal["sl"],
+                "tp": signal["tp"],
+                "deviation": 20,
+                "magic": 100,
+                "comment": "AI BOT",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
             }
 
-        order_type = mt5.ORDER_TYPE_BUY
-        price = tick.ask
+            result = mt5.order_send(request)
 
-        if signal["signal"] == "SELL":
+        else:
+            # Demo mode
+            result = "[DEMO] Order simulated — MT5 not available on this platform"
+            print(f"[DEMO] execute_trade: {signal['signal']} {symbol} @ {signal['price']}")
 
-            order_type = mt5.ORDER_TYPE_SELL
-            price = tick.bid
-
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
+        trade_history_data.append({
+            "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "symbol": symbol,
-            "volume": calculate_lot_size(10),
-            "type": order_type,
-            "price": price,
-            "sl": signal["sl"],
-            "tp": signal["tp"],
-            "deviation": 20,
-            "magic": 100,
-            "comment": "AI BOT",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-
-        result = mt5.order_send(request)
+            "signal": signal['signal'],
+            "entry": signal['price'],
+            "confidence": signal['confidence']
+        })
 
         return {
             "status": "success",
